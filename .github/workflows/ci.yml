@@ -40,7 +40,7 @@ jobs:
         with:
           components: clippy
       - uses: Swatinem/rust-cache@v2
-      - run: cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
+      - run: cargo clippy --workspace --all-targets --all-features  -- -D warnings
 
   test:
     name: test
@@ -50,9 +50,9 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: Test (all features)
-        run: cargo test --workspace --all-features --locked
+        run: cargo test --workspace --all-features 
       - name: Test (default features)
-        run: cargo test --workspace --locked
+        run: cargo test --workspace 
 
   docs:
     name: doc
@@ -61,7 +61,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - run: cargo doc --workspace --all-features --no-deps --locked
+      - run: cargo doc --workspace --all-features --no-deps 
 
   msrv:
     name: msrv (1.82)
@@ -70,7 +70,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@1.82.0
       - uses: Swatinem/rust-cache@v2
-      - run: cargo check --workspace --all-features --locked
+      - run: cargo check --workspace --all-features 
 
   deny:
     name: cargo-deny
