@@ -1,0 +1,16 @@
+[package]
+name = "syren-gen"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "Build-time code generation for syren"
+
+[lints]
+workspace = true
+
+# Intentionally dependency-free: this crate is used as a build-dependency, so
+# keeping it std-only keeps cold-build times low.
+[dependencies]

@@ -1,0 +1,23 @@
+[package]
+name = "syren-trace"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "Tracing backends for syren"
+
+[lints]
+workspace = true
+
+[dependencies]
+syren-common = { workspace = true }
+nix = { workspace = true }
+libc = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+
+[features]
+default = []
+ebpf = []
