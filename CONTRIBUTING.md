@@ -2,8 +2,7 @@
 
 Thanks for your interest in syren! This guide covers the development loop, the
 checks CI runs (so you can run them locally first), and the project's
-conventions. For the design behind the code, read
-[`ARCHITECTURE.md`](ARCHITECTURE.md).
+conventions.
 
 ## Prerequisites
 
