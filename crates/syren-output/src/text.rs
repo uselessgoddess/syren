@@ -1,4 +1,7 @@
+use std::borrow::Cow;
 use std::io::{self, Write};
+
+use syren_decode::DecodedSyscall;
 
 use crate::{Record, Sink};
 
@@ -9,12 +12,15 @@ pub struct TextOptions {
     pub show_pid: bool,
     /// Append the syscall duration as `<seconds>` (like strace `-T`).
     pub show_timing: bool,
+    /// Colourise the output with ANSI escapes.
+    pub color: bool,
 }
 
 /// Writes trace records as strace-style text.
 pub struct TextSink<W> {
     out: W,
     opts: TextOptions,
+    palette: Palette,
 }
 
 impl<W> std::fmt::Debug for TextSink<W> {
@@ -26,12 +32,13 @@ impl<W> std::fmt::Debug for TextSink<W> {
 impl<W: Write> TextSink<W> {
     /// A sink with default options.
     pub fn new(out: W) -> Self {
-        Self { out, opts: TextOptions::default() }
+        Self::with_options(out, TextOptions::default())
     }
 
     /// A sink with explicit options.
     pub fn with_options(out: W, opts: TextOptions) -> Self {
-        Self { out, opts }
+        let palette = Palette::new(opts.color);
+        Self { out, opts, palette }
     }
 
     fn prefix(&mut self, pid: u32) -> io::Result<()> {
@@ -40,14 +47,31 @@ impl<W: Write> TextSink<W> {
         }
         Ok(())
     }
+
+    fn write_call(&mut self, s: &DecodedSyscall) -> io::Result<()> {
+        let p = self.palette;
+        write!(self.out, "{}{}{}(", p.name, s.name, p.reset)?;
+        for (i, a) in s.args.iter().enumerate() {
+            if i > 0 {
+                write!(self.out, ", ")?;
+            }
+            write!(self.out, "{}", a.value)?;
+        }
+        let ret = s.retval_str();
+        match &s.error {
+            Some(_) => write!(self.out, ") = {}{ret}{}", p.error, p.reset),
+            None => write!(self.out, ") = {ret}"),
+        }
+    }
 }
 
 impl<W: Write> Sink for TextSink<W> {
     fn record(&mut self, rec: Record<'_>) -> io::Result<()> {
+        let p = self.palette;
         match rec {
             Record::Syscall(s) => {
                 self.prefix(s.pid)?;
-                write!(self.out, "{} = {}", s.signature(), s.retval_str())?;
+                self.write_call(s)?;
                 if self.opts.show_timing {
                     write!(self.out, " <{}>", fmt_secs(s.duration_ns))?;
                 }
@@ -55,11 +79,11 @@ impl<W: Write> Sink for TextSink<W> {
             }
             Record::Exit { pid, code } => {
                 self.prefix(pid)?;
-                writeln!(self.out, "+++ exited with {code} +++")
+                writeln!(self.out, "{}+++ exited with {code} +++{}", p.meta, p.reset)
             }
             Record::Signal { pid, signal } => {
                 self.prefix(pid)?;
-                writeln!(self.out, "--- {} ---", signal_name(signal))
+                writeln!(self.out, "{}--- {} ---{}", p.meta, signal_name(signal), p.reset)
             }
         }
     }
@@ -69,31 +93,33 @@ fn fmt_secs(ns: u64) -> String {
     format!("{:.6}", ns as f64 / 1_000_000_000.0)
 }
 
-fn signal_name(sig: i32) -> String {
-    let name = match sig {
-        1 => "SIGHUP",
-        2 => "SIGINT",
-        3 => "SIGQUIT",
-        4 => "SIGILL",
-        5 => "SIGTRAP",
-        6 => "SIGABRT",
-        7 => "SIGBUS",
-        8 => "SIGFPE",
-        9 => "SIGKILL",
-        10 => "SIGUSR1",
-        11 => "SIGSEGV",
-        12 => "SIGUSR2",
-        13 => "SIGPIPE",
-        14 => "SIGALRM",
-        15 => "SIGTERM",
-        17 => "SIGCHLD",
-        18 => "SIGCONT",
-        19 => "SIGSTOP",
-        20 => "SIGTSTP",
-        28 => "SIGWINCH",
-        _ => return format!("signal {sig}"),
+fn signal_name(sig: i32) -> Cow<'static, str> {
+    match syren_common::signal_name(sig) {
+        Some(name) => Cow::Borrowed(name),
+        None => Cow::Owned(format!("signal {sig}")),
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct Palette {
+    name: &'static str,
+    error: &'static str,
+    meta: &'static str,
+    reset: &'static str,
+}
+
+impl Palette {
+    const PLAIN: Palette = Palette { name: "", error: "", meta: "", reset: "" };
+    const COLOR: Palette = Palette {
+        name: "\x1b[36m",  // cyan: the syscall name
+        error: "\x1b[31m", // red: failed return values
+        meta: "\x1b[33m",  // yellow: exit/signal lines
+        reset: "\x1b[0m",
     };
-    name.to_string()
+
+    fn new(color: bool) -> Palette {
+        if color { Palette::COLOR } else { Palette::PLAIN }
+    }
 }
 
 #[cfg(test)]
@@ -118,7 +144,7 @@ mod tests {
     fn timing_and_pid_prefix() {
         let mut buf = Vec::new();
         {
-            let opts = TextOptions { show_pid: true, show_timing: true };
+            let opts = TextOptions { show_pid: true, show_timing: true, color: false };
             let mut sink = TextSink::with_options(&mut buf, opts);
             let s = syscall("getpid", vec![], 100);
             sink.record(Record::Syscall(&s)).unwrap();
@@ -138,5 +164,19 @@ mod tests {
         }
         let out = String::from_utf8(buf).unwrap();
         assert_eq!(out, "--- SIGINT ---\n--- signal 99 ---\n");
+    }
+
+    #[test]
+    fn color_wraps_name_and_meta() {
+        let mut buf = Vec::new();
+        {
+            let opts = TextOptions { color: true, ..TextOptions::default() };
+            let mut sink = TextSink::with_options(&mut buf, opts);
+            let s = syscall("getpid", vec![], 100);
+            sink.record(Record::Syscall(&s)).unwrap();
+            sink.record(Record::Signal { pid: 100, signal: 9 }).unwrap();
+        }
+        let out = String::from_utf8(buf).unwrap();
+        assert_eq!(out, "\u{1b}[36mgetpid\u{1b}[0m() = 100\n\u{1b}[33m--- SIGKILL ---\u{1b}[0m\n");
     }
 }

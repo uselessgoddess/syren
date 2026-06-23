@@ -39,11 +39,11 @@ struct Cli {
     #[arg(short = 'f', long = "follow")]
     follow: bool,
 
-    /// Show each syscall's duration as `<seconds>` (text output only).
+    /// Show each syscall's duration as `<seconds>`.
     #[arg(short = 'T', long = "timing")]
     timing: bool,
 
-    /// Emit newline-delimited JSON (one object per record) instead of text.
+    /// Emit newline-delimited JSON instead of text.
     #[arg(long, conflicts_with = "summary")]
     json: bool,
 
@@ -60,7 +60,9 @@ struct Cli {
     #[arg(short = 'o', long = "output", value_name = "FILE")]
     output: Option<PathBuf>,
 
-    /// Tracing backend to use.
+    #[arg(long, value_enum, default_value_t = ColorArg::Auto, value_name = "WHEN")]
+    color: ColorArg,
+
     #[arg(long, value_enum, default_value_t = BackendArg::Ptrace)]
     backend: BackendArg,
 
@@ -76,9 +78,9 @@ struct Cli {
 /// CLI mirror of [`syren_trace::Backend`] so clap can derive `--backend`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
 enum BackendArg {
-    /// Unprivileged `ptrace(2)` engine (default; needs no root).
+    /// Unprivileged `ptrace(2)` engine.
     Ptrace,
-    /// eBPF engine (requires the `ebpf` build feature).
+    /// Privilegeded BPF engine
     Ebpf,
 }
 
@@ -91,13 +93,29 @@ impl From<BackendArg> for Backend {
     }
 }
 
+/// When to colourise the text output.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, ValueEnum)]
+enum ColorArg {
+    #[default]
+    Auto,
+    Always,
+    Never,
+}
+
+impl ColorArg {
+    fn resolve(self, is_terminal: bool) -> bool {
+        match self {
+            ColorArg::Always => true,
+            ColorArg::Never => false,
+            ColorArg::Auto => is_terminal && std::env::var_os("NO_COLOR").is_none(),
+        }
+    }
+}
+
 fn main() -> ExitCode {
     init_logging();
     match run(Cli::parse()) {
         Ok(code) => code,
-        // A closed downstream pipe (e.g. `syren --list-syscalls | head`) is not an
-        // error: exit quietly like any well-behaved Unix tool instead of printing
-        // "Broken pipe".
         Err(err) if is_broken_pipe(&err) => ExitCode::SUCCESS,
         Err(err) => {
             eprintln!("syren: {err:#}");
@@ -132,7 +150,9 @@ fn run(cli: Cli) -> Result<ExitCode> {
         tracer(cli.backend.into(), target, options).context("failed to start tracer")?;
     let leader = tracer.leader();
 
-    let mut sink = build_sink(&cli, open_output(&cli)?);
+    let output = open_output(&cli)?;
+    let color = cli.color.resolve(output.is_terminal);
+    let mut sink = build_sink(&cli, output.writer, color);
 
     let mut exit_code: i32 = 0;
     while let Some(event) = tracer.next_event()? {
@@ -180,24 +200,35 @@ fn build_target(cli: &Cli) -> Result<Target> {
     }
 }
 
-fn open_output(cli: &Cli) -> Result<Box<dyn Write>> {
-    match &cli.output {
+struct Output {
+    writer: Box<dyn Write>,
+    is_terminal: bool,
+}
+
+fn open_output(cli: &Cli) -> Result<Output> {
+    use std::io::IsTerminal;
+    match cli.output.as_deref() {
+        Some(path) if path.as_os_str() == "-" => {
+            Ok(Output { writer: Box::new(io::stdout()), is_terminal: io::stdout().is_terminal() })
+        }
         Some(path) => {
             let file = File::create(path)
                 .with_context(|| format!("cannot create output file `{}`", path.display()))?;
-            Ok(Box::new(BufWriter::new(file)))
+            Ok(Output { writer: Box::new(BufWriter::new(file)), is_terminal: false })
         }
-        None => Ok(Box::new(io::stderr())),
+        None => {
+            Ok(Output { writer: Box::new(io::stderr()), is_terminal: io::stderr().is_terminal() })
+        }
     }
 }
 
-fn build_sink(cli: &Cli, writer: Box<dyn Write>) -> Box<dyn Sink> {
+fn build_sink(cli: &Cli, writer: Box<dyn Write>, color: bool) -> Box<dyn Sink> {
     if cli.summary {
         Box::new(SummarySink::new(writer))
     } else if cli.json {
         Box::new(JsonSink::new(writer))
     } else {
-        let opts = TextOptions { show_pid: cli.follow, show_timing: cli.timing };
+        let opts = TextOptions { show_pid: cli.follow, show_timing: cli.timing, color };
         Box::new(TextSink::with_options(writer, opts))
     }
 }

@@ -7,7 +7,7 @@ conventions. For the design behind the code, read
 
 ## Prerequisites
 
-- **Rust ≥ 1.82** (the MSRV). A stable toolchain is pinned in
+- **Rust ≥ 1.85** (the MSRV). A stable toolchain is pinned in
   [`rust-toolchain.toml`](rust-toolchain.toml), so `rustup` will install the
   right components automatically.
 - **Linux on x86-64.** syren traces the Linux syscall ABI directly; the tracing
@@ -27,29 +27,12 @@ binary is `syren`, so `-- echo hi` traces `echo hi`.
 
 ## Before you push: the local CI checklist
 
-CI runs these exact commands (see [`.github/workflows/ci.yml`](.github/workflows/ci.yml)).
-Running them locally catches everything CI would, before you wait on a runner:
+With [`just`](https://just.systems) installed, `just pre` runs the everyday gate
+(format check, lints, tests, docs) and `just ci` mirrors the server exactly,
+supply-chain and MSRV jobs included. Run `just` on its own to list every recipe.
 
-```console
-# 1. Formatting (CI runs --check; this fixes in place)
-$ cargo fmt --all
-
-# 2. Lints — warnings are denied in CI, so treat them as errors
-$ cargo clippy --workspace --all-targets --all-features -- -D warnings
-
-# 3. Tests, with and without the optional ebpf feature
-$ cargo test --workspace --all-features
-$ cargo test --workspace
-
-# 4. Docs — broken intra-doc links fail the build under -D warnings
-$ RUSTDOCFLAGS="-D warnings" cargo doc --workspace --all-features --no-deps
-
-# 5. Supply-chain & licenses (install once: cargo install cargo-deny)
-$ cargo deny check
-```
-
-CI additionally builds against the MSRV (`cargo +1.82.0 check --workspace
---all-features`) to make sure nothing newer than 1.82 sneaks in.
+CI additionally builds against the MSRV (`cargo +1.85.0 check --workspace
+--all-features`) to make sure nothing newer than 1.85 sneaks in.
 
 ## Code style and lints
 

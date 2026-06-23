@@ -4,6 +4,7 @@
 //! Reading argument strings and buffers requires access to the traced process's
 //! address space; that is abstracted behind the [`MemoryReader`].
 
+mod consts;
 mod flags;
 mod render;
 
@@ -184,6 +185,12 @@ fn render_arg(
     mem: &dyn MemoryReader,
 ) -> String {
     let raw = ev.args[i];
+    if let Some(symbolic) = consts::render(syscall, metas, i, ev) {
+        return symbolic;
+    }
+    if syscall == "setsockopt" && metas[i].name == "optval" {
+        return render_sockopt_optval(ev, mem);
+    }
     match metas[i].ty {
         ArgType::Fd => render_fd(raw),
         ArgType::Path => render::read_cstr(mem, raw, render::PATH_CAP)
@@ -226,6 +233,22 @@ fn render_buf(metas: &[ArgInfo], i: usize, ev: &SyscallEvent, mem: &dyn MemoryRe
         Some(bytes) if !bytes.is_empty() => render::quote_bytes(&bytes),
         _ => format!("{addr:#x}"),
     }
+}
+
+fn render_sockopt_optval(ev: &SyscallEvent, mem: &dyn MemoryReader) -> String {
+    let addr = ev.args[3];
+    if addr == 0 {
+        return "NULL".to_string();
+    }
+    if ev.args[4] == 4 {
+        if let Some(bytes) = mem.read(addr, 4) {
+            if let Ok(word) = <[u8; 4]>::try_from(bytes.as_slice()) {
+                return format!("[{}]", i32::from_ne_bytes(word));
+            }
+        }
+    }
+
+    format!("{addr:#x}")
 }
 
 fn decode_raw(ev: &SyscallEvent) -> Vec<DecodedArg> {
@@ -341,6 +364,26 @@ mod tests {
             "mmap(NULL, 4096, PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_ANONYMOUS, -1, 0)"
         );
         assert_eq!(d.retval_str(), "0x7f001000");
+    }
+
+    #[test]
+    fn socket_renders_symbolic_constants() {
+        let d = decode(&ev("socket", [10, 2, 0, 0, 0, 0], 3), &NullMemory);
+        assert_eq!(d.signature(), "socket(AF_INET6, SOCK_DGRAM, IPPROTO_IP)");
+    }
+
+    #[test]
+    fn setsockopt_renders_level_optname_and_value() {
+        let one = 1i32.to_ne_bytes();
+        let m = mem(&[(0x5000, &one)]);
+        let d = decode(&ev("setsockopt", [4, 6, 1, 0x5000, 4, 0], 0), &m);
+        assert_eq!(d.signature(), "setsockopt(4, SOL_TCP, TCP_NODELAY, [1], 4)");
+    }
+
+    #[test]
+    fn setsockopt_optval_falls_back_to_pointer_for_structs() {
+        let d = decode(&ev("setsockopt", [4, 1, 13, 0xcafe, 8, 0], 0), &NullMemory);
+        assert_eq!(d.signature(), "setsockopt(4, SOL_SOCKET, SO_LINGER, 0xcafe, 8)");
     }
 
     #[test]

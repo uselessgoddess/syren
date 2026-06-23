@@ -4,7 +4,7 @@
 
 [![CI](https://github.com/uselessgoddess/syren/actions/workflows/ci.yml/badge.svg)](https://github.com/uselessgoddess/syren/actions/workflows/ci.yml)
 [![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](#license)
-[![MSRV](https://img.shields.io/badge/MSRV-1.82-orange.svg)](#building-from-source)
+[![MSRV](https://img.shields.io/badge/MSRV-1.85-orange.svg)](#building-from-source)
 
 syren runs a program (or attaches to a running one), watches the system calls it
 makes, decodes their arguments into something a human can read, and prints them —
@@ -40,6 +40,10 @@ write(1, "hi\n", 3) = 3
 - **strace-compatible output.** Trace lines look like strace's, and — like
   strace — go to **stderr**, so the traced program's own stdout/stderr pass
   through untouched and stay pipeable.
+- **Symbolic, colourised arguments.** Raw numbers become names: `socket(10, 2,0)` 
+  prints as `socket(AF_INET6, SOCK_DGRAM, IPPROTO_IP)`, flag words decode to
+  `O_RDONLY|O_CLOEXEC`, and pointed-to values render as `[1]` — the shorthand
+  strace uses. Output is coloured on a terminal (`--color`, honours `NO_COLOR`).
 - **Structured output for tooling.** `--json` emits one NDJSON record per
   syscall, ready for `jq`, a log pipeline, or a notebook.
 - **An aggregate view.** `-c` prints a `strace -c`-style table: call counts,
@@ -49,8 +53,6 @@ write(1, "hi\n", 3) = 3
   decode/output layers.
 
 ## Building from source
-
-syren is a Rust workspace. With a stable toolchain (MSRV **1.82**):
 
 ```console
 $ git clone https://github.com/uselessgoddess/syren
@@ -82,7 +84,8 @@ $ syren -p PID [OPTIONS]                 # attach to a running process
 | `-c, --summary` | Print an aggregate summary table instead of every call. |
 | `--json` | Emit newline-delimited JSON instead of text. |
 | `-T, --timing` | Annotate each call with its duration. |
-| `-o, --output <FILE>` | Write the trace to a file instead of stderr. |
+| `-o, --output <FILE>` | Write the trace to a file instead of stderr; `-` means stdout. |
+| `--color <auto\|always\|never>` | Colourise the trace (default `auto`; `auto`/`never` honour `NO_COLOR`). |
 | `--backend <ptrace\|ebpf>` | Choose the tracing backend (default `ptrace`). |
 | `--list-syscalls` | Print the known syscall table and exit. |
 
@@ -109,7 +112,20 @@ write(1, "hello, syren\n", 13) = 13
 raw register value side by side:
 
 ```console
-$ syren --json -e trace=write echo hi 2>&1 >/dev/null
+$ syren --json -o trace.ndjson echo hi
+hi
+$ jq -c 'select(.type == "syscall") | {name, retval}' trace.ndjson
+{"name":"write","retval":3}
+```
+
+`-o -` sends the stream to **stdout** instead, for a direct pipe when you don't
+also need the program's own stdout: `syren --json -o - PROG | jq`. To pipe the
+trace through `jq` *and* keep the program's own output, hand `-o` a process
+substitution: `syren --json -o >(jq .) PROG`.
+
+A single record, pretty-printed here — the real output is one object per line:
+
+```console
 {"type":"syscall","pid":727257,"tid":727257,"nr":1,"name":"write",
  "args":[{"name":"fd","value":"1","raw":1},
          {"name":"buf","value":"\"hi\\n\"","raw":105374297248496},
@@ -117,8 +133,6 @@ $ syren --json -e trace=write echo hi 2>&1 >/dev/null
  "retval":3,"duration_ns":17897,"ts_enter_ns":3376720}
 {"type":"exit","pid":727257,"code":0}
 ```
-
-(pretty-printed here for the README; the real output is one object per line.)
 
 **Summary** (`-c`) — aggregate like `strace -c`:
 

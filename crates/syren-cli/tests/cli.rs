@@ -46,7 +46,26 @@ fn json_emits_typed_records() {
 }
 
 #[test]
-fn summar_prints_table() {
+fn color_always_emits_ansi() {
+    syren()
+        .args(["--color", "always", "-e", "trace=write", "echo", "hi"])
+        .assert()
+        .success()
+        .stderr(predicate::str::contains("\u{1b}[36mwrite\u{1b}[0m("));
+}
+
+#[test]
+fn dash_routes_stdout() {
+    syren()
+        .args(["-o", "-", "-e", "trace=write", "echo", "hi"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("write(1, "))
+        .stderr(predicate::str::contains("write(1, ").not());
+}
+
+#[test]
+fn summary_prints_table() {
     syren()
         .args(["-c", "true"])
         .assert()

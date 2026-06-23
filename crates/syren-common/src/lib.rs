@@ -8,10 +8,12 @@
 
 mod errno;
 mod event;
+mod signal;
 
 pub use errno::{Errno, errno};
 pub use event::{Event, SyscallEvent};
 use serde::{Deserialize, Serialize};
+pub use signal::signal_name;
 
 /// Coarse syscall category.
 /// Kept variant-for-variant in sync with `syren_gen::Category`.
@@ -77,8 +79,7 @@ impl Category {
     }
 }
 
-/// The display/decoding kind of a single argument.
-/// How a single syscall argument should be decoded and rendered.
+/// How a single syscall argument is decoded and rendered.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ArgType {

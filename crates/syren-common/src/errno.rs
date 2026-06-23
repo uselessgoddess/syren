@@ -177,8 +177,8 @@ mod tests {
     #[test]
     fn unknown_and_gap_codes_are_none() {
         assert!(errno(0).is_none());
-        assert!(errno(41).is_none()); 
-        assert!(errno(58).is_none()); 
+        assert!(errno(41).is_none());
+        assert!(errno(58).is_none());
         assert!(errno(9999).is_none());
     }
 

@@ -12,6 +12,7 @@ description = "Output formatters (text, NDJSON, summary) for syren"
 workspace = true
 
 [dependencies]
+syren-common = { workspace = true }
 syren-decode = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

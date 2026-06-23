@@ -115,7 +115,7 @@ static METADATA: &[SyscallMeta] = &[
     syscall_meta!("ftruncate"   => [("fd", Fd), ("length", Offset)]),
     syscall_meta!("truncate"    => [("path", Path), ("length", Offset)]),
 
-    // metadata / paths 
+    // metadata / paths
     syscall_meta!("stat"        => [("filename", Path), ("statbuf", Ptr)]),
     syscall_meta!("lstat"       => [("filename", Path), ("statbuf", Ptr)]),
     syscall_meta!("fstat"       => [("fd", Fd), ("statbuf", Ptr)]),
@@ -141,7 +141,7 @@ static METADATA: &[SyscallMeta] = &[
     syscall_meta!("fchmod"      => [("fd", Fd), ("mode", Int)]),
     syscall_meta!("umask"       => [("mask", Int)]),
 
-    // memory 
+    // memory
     syscall_meta!("mmap"        => [("addr", Ptr), ("len", Size), ("prot", Flags), ("flags", Flags), ("fd", Fd), ("off", Offset)]),
     syscall_meta!("munmap"      => [("addr", Ptr), ("len", Size)]),
     syscall_meta!("mprotect"    => [("addr", Ptr), ("len", Size), ("prot", Flags)]),
@@ -149,7 +149,7 @@ static METADATA: &[SyscallMeta] = &[
     syscall_meta!("brk"         => [("brk", Ptr)]),
     syscall_meta!("madvise"     => [("addr", Ptr), ("len", Size), ("advice", Int)]),
 
-    // process / threads 
+    // process / threads
     syscall_meta!("execve"      => [("filename", Path), ("argv", Ptr), ("envp", Ptr)]),
     syscall_meta!("execveat"    => [("dfd", Fd), ("filename", Path), ("argv", Ptr), ("envp", Ptr), ("flags", Flags)]),
     syscall_meta!("clone"       => [("flags", Flags), ("stack", Ptr), ("parent_tid", Ptr), ("child_tid", Ptr), ("tls", Hex)]),
@@ -165,13 +165,13 @@ static METADATA: &[SyscallMeta] = &[
     syscall_meta!("arch_prctl"  => [("code", Int), ("addr", Hex)]),
     syscall_meta!("rseq"        => [("rseq", Ptr), ("rseq_len", Uint), ("flags", Flags), ("sig", Uint)]),
 
-    //  signals 
+    //  signals
     syscall_meta!("rt_sigaction"   => [("sig", Int), ("act", Ptr), ("oact", Ptr), ("sigsetsize", Size)]),
     syscall_meta!("rt_sigprocmask" => [("how", Int), ("set", Ptr), ("oset", Ptr), ("sigsetsize", Size)]),
     syscall_meta!("kill"           => [("pid", Int), ("sig", Int)]),
     syscall_meta!("tgkill"         => [("tgid", Int), ("pid", Int), ("sig", Int)]),
 
-    // networking 
+    // networking
     syscall_meta!("socket"      => [("family", Int), ("type", Int), ("protocol", Int)]),
     syscall_meta!("connect"     => [("fd", Fd), ("uservaddr", Ptr), ("addrlen", Int)]),
     syscall_meta!("accept"      => [("fd", Fd), ("upeer", Ptr), ("upeer_addrlen", Ptr)]),
@@ -183,7 +183,7 @@ static METADATA: &[SyscallMeta] = &[
     syscall_meta!("setsockopt"  => [("fd", Fd), ("level", Int), ("optname", Int), ("optval", Ptr), ("optlen", Int)]),
     syscall_meta!("getsockopt"  => [("fd", Fd), ("level", Int), ("optname", Int), ("optval", Ptr), ("optlen", Ptr)]),
 
-    // polling / events 
+    // polling / events
     syscall_meta!("poll"        => [("ufds", Ptr), ("nfds", Uint), ("timeout", Int)]),
     syscall_meta!("ppoll"       => [("ufds", Ptr), ("nfds", Uint), ("tsp", Ptr), ("sigmask", Ptr), ("sigsetsize", Size)]),
     syscall_meta!("select"      => [("n", Int), ("inp", Ptr), ("outp", Ptr), ("exp", Ptr), ("tvp", Ptr)]),
@@ -192,7 +192,7 @@ static METADATA: &[SyscallMeta] = &[
     syscall_meta!("epoll_wait"  => [("epfd", Fd), ("events", Ptr), ("maxevents", Int), ("timeout", Int)]),
     syscall_meta!("eventfd2"    => [("count", Uint), ("flags", Flags)]),
 
-    // time & sync 
+    // time & sync
     syscall_meta!("nanosleep"     => [("rqtp", Ptr), ("rmtp", Ptr)]),
     syscall_meta!("clock_gettime" => [("which_clock", Int), ("tp", Ptr)]),
     syscall_meta!("clock_nanosleep" => [("which_clock", Int), ("flags", Flags), ("rqtp", Ptr), ("rmtp", Ptr)]),
