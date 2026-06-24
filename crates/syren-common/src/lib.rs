@@ -6,19 +6,29 @@
 //! The syscall table itself is generated at build time by `syren-gen` from the
 //! vendored `data/syscall_64.tbl`.
 
+#![cfg_attr(not(feature = "std"), no_std)]
+
+#[cfg(feature = "ebpf")]
+pub mod ebpf;
 mod errno;
 mod event;
+#[cfg(feature = "std")]
+mod mem;
 mod signal;
 
 pub use errno::{Errno, errno};
 pub use event::{Event, SyscallEvent};
+#[cfg(feature = "std")]
+pub use mem::{MemoryReader, NullMemory, ProcMemReader};
+#[cfg(feature = "std")]
 use serde::{Deserialize, Serialize};
 pub use signal::signal_name;
 
 /// Coarse syscall category.
 /// Kept variant-for-variant in sync with `syren_gen::Category`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "std", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "std", serde(rename_all = "lowercase"))]
 pub enum Category {
     /// Filesystem & file-descriptor I/O.
     Fs,
@@ -80,8 +90,9 @@ impl Category {
 }
 
 /// How a single syscall argument is decoded and rendered.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "lowercase")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "std", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "std", serde(rename_all = "lowercase"))]
 pub enum ArgType {
     /// A file descriptor (`int`). Rendered as a decimal, annotated with the
     /// resolved path when known.
@@ -147,6 +158,7 @@ pub fn syscall_by_name(name: &str) -> Option<&'static SyscallInfo> {
 }
 
 /// The display name for a raw syscall number.
+#[cfg(feature = "std")]
 pub fn syscall_name(nr: u64) -> std::borrow::Cow<'static, str> {
     match u32::try_from(nr).ok().and_then(syscall_by_number) {
         Some(info) => std::borrow::Cow::Borrowed(info.name),

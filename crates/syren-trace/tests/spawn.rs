@@ -1,7 +1,7 @@
 use std::sync::Mutex;
 
 use syren_common::Event;
-use syren_trace::{Backend, Target, TraceOptions, tracer};
+use syren_trace::{Backend, Target, TraceError, TraceOptions, tracer};
 
 static TRACER_LOCK: Mutex<()> = Mutex::new(());
 
@@ -76,6 +76,9 @@ fn unknown_program_fails_to_start() {
     assert!(result.is_err(), "spawning a missing program must fail");
 }
 
+/// Without the `ebpf` feature the backend reports itself unavailable, so the
+/// default std-only build stays honest about what it can do.
+#[cfg(not(feature = "ebpf"))]
 #[test]
 fn ebpf_is_unavailable_by_default() {
     let result = tracer(
@@ -83,5 +86,34 @@ fn ebpf_is_unavailable_by_default() {
         Target::Spawn { program: "/bin/true".into(), args: vec![] },
         TraceOptions::default(),
     );
-    assert!(result.is_err(), "ebpf backend should be unavailable without the feature");
+    assert!(
+        matches!(result.err(), Some(TraceError::BackendUnavailable("ebpf"))),
+        "without the ebpf feature the backend must report itself unavailable"
+    );
+}
+
+/// With the `ebpf` feature compiled in, construction must either succeed (when
+/// we have `CAP_BPF` and kernel BTF — the privileged CI job) or fail
+/// *gracefully* with [`TraceError::EbpfUnsupported`] so the CLI can fall back to
+/// ptrace. When it does load, it must produce the same event stream as ptrace.
+#[cfg(feature = "ebpf")]
+#[test]
+fn ebpf_feature_loads_or_degrades_gracefully() {
+    let _guard = serial();
+    let result = tracer(
+        Backend::Ebpf,
+        Target::Spawn { program: "/bin/true".into(), args: vec![] },
+        TraceOptions::default(),
+    );
+    match result {
+        Ok(t) => {
+            let (syscalls, exit, _signals) = drain(t);
+            assert!(syscalls > 0, "eBPF backend should observe syscalls from /bin/true");
+            assert_eq!(exit, Some(0), "/bin/true should exit 0 under the eBPF backend");
+        }
+        Err(e) => assert!(
+            matches!(e, TraceError::EbpfUnsupported(_)),
+            "ebpf must degrade gracefully with EbpfUnsupported, got {e:?}"
+        ),
+    }
 }

@@ -26,16 +26,19 @@ The tracing pipeline, end to end, on a zero-privilege backend.
 - [x] **Efficient CI**: fmt, clippy (`-D warnings`), tests (default + all
       features), docs, MSRV, and supply-chain checks.
 
-## [ ] v0.2 — The eBPF backend
+## [X] v0.2 — The eBPF backend (behind the `ebpf` feature)
 
 syren's performance north star: trace without two context switches per syscall.
 
-- [ ] aya program on the `raw_syscalls` `sys_enter`/`sys_exit` tracepoints.
-- [ ] Per-CPU enter/exit pairing and a ring buffer to userspace, emitting the
+- [x] aya program on the `raw_syscalls` `sys_enter`/`sys_exit` tracepoints, with
+      `sched_process_fork` under `--follow` to track new tasks.
+- [x] Per-CPU enter/exit pairing and a ring buffer to userspace, emitting the
       **same `Event` stream** the ptrace backend does (decode/output reused as-is).
-- [ ] Graceful capability detection and fallback to ptrace when eBPF is
-      unavailable (no `CAP_BPF`, no BTF).
-- [ ] Overhead benchmarks (ptrace vs. eBPF) under load.
+- [x] In-kernel path capture (`bpf_probe_read_user_str`) so the decoder reads the
+      same bytes whichever backend produced them.
+- [x] Graceful capability detection (`CAP_BPF`, BTF) and fallback to ptrace when
+      eBPF is unavailable.
+- [x] Overhead benchmark (ptrace vs. eBPF) under a syscall-heavy load (`just bench`).
 
 ## [ ] v0.3 — Deeper decoding
 

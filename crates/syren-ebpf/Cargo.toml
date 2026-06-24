@@ -1,0 +1,25 @@
+[package]
+name = "syren-ebpf"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.85"
+license = "MIT OR Apache-2.0"
+authors = ["The syren authors"]
+repository = "https://github.com/uselessgoddess/syren"
+description = "syren's in-kernel eBPF program"
+publish = false
+
+[dependencies]
+aya-ebpf = { version = "0.1" }
+syren-common = { path = "../syren-common", features = ["ebpf"] }
+
+[[bin]]
+name = "syren"
+path = "src/main.rs"
+
+[profile.release]
+opt-level = 3
+debug = false
+lto = true
+panic = "abort"
+codegen-units = 1

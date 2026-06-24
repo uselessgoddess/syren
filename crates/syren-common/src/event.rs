@@ -1,5 +1,6 @@
 //! Events produced by the tracing backends.
 
+#[cfg(feature = "std")]
 use serde::{Deserialize, Serialize};
 
 use crate::{SyscallInfo, syscall_by_number};
@@ -11,7 +12,8 @@ use crate::{SyscallInfo, syscall_by_number};
 /// separate enter/exit events, which keeps the common case (`name(args) = ret`)
 /// cheap to format. Backends that observe enter and exit separately are
 /// responsible for the pairing.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "std", derive(Serialize, Deserialize))]
 pub struct SyscallEvent {
     /// Thread-group id (the "process id" in userspace terms).
     pub pid: u32,
@@ -49,8 +51,9 @@ impl SyscallEvent {
 }
 
 /// A trace event: either a completed syscall or a process lifecycle change.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "std", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "std", serde(tag = "type", rename_all = "snake_case"))]
 pub enum Event {
     /// A completed syscall.
     Syscall(SyscallEvent),
@@ -95,6 +98,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "std")]
     fn event_serializes_to_json() {
         let json = serde_json::to_string(&Event::Syscall(ev(0, 3))).unwrap();
         assert!(json.contains("\"type\":\"syscall\""));

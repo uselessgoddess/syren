@@ -12,12 +12,14 @@ description = "Tracing backends for syren"
 workspace = true
 
 [dependencies]
-syren-common = { workspace = true }
+syren-common = { workspace = true, features = ["std"] }
 nix = { workspace = true }
 libc = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 
+aya = { workspace = true, optional = true }
+
 [features]
 default = []
-ebpf = []
+ebpf = ["dep:aya", "syren-common/ebpf"]

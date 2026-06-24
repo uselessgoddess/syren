@@ -21,9 +21,9 @@ use anyhow::{Context, Result, bail};
 use clap::{Parser, ValueEnum};
 use filter::Filter;
 use syren_common::{Event, SYSCALLS};
-use syren_decode::{NullMemory, ProcMemReader, decode};
+use syren_decode::decode;
 use syren_output::{JsonSink, Record, Sink, SummarySink, TextOptions, TextSink};
-use syren_trace::{Backend, Target, TraceOptions, tracer};
+use syren_trace::{Backend, Target, TraceError, TraceOptions, Tracer, tracer};
 
 /// A modern, eBPF-ready strace alternative: run a program (or attach to one) and
 /// trace, decode and aggregate the system calls it makes.
@@ -146,8 +146,7 @@ fn run(cli: Cli) -> Result<ExitCode> {
     let options = TraceOptions { follow_forks: cli.follow };
     let filter = Filter::from_exprs(&cli.exprs)?;
 
-    let mut tracer =
-        tracer(cli.backend.into(), target, options).context("failed to start tracer")?;
+    let mut tracer = build_tracer(cli.backend.into(), target, options)?;
     let leader = tracer.leader();
 
     let output = open_output(&cli)?;
@@ -161,10 +160,8 @@ fn run(cli: Cli) -> Result<ExitCode> {
                 if !filter.allows(ev.nr) {
                     continue;
                 }
-                let decoded = match ProcMemReader::open(ev.tid) {
-                    Ok(mem) => decode(&ev, &mem),
-                    Err(_) => decode(&ev, &NullMemory),
-                };
+                let mem = tracer.memory(&ev);
+                let decoded = decode(&ev, mem.as_ref());
                 sink.record(Record::Syscall(&decoded))?;
             }
             Event::ProcessExit { pid, code } => {
@@ -182,6 +179,23 @@ fn run(cli: Cli) -> Result<ExitCode> {
     drop(sink);
 
     Ok(ExitCode::from(exit_code.clamp(0, 255) as u8))
+}
+
+fn build_tracer(
+    backend: Backend,
+    target: Target,
+    options: TraceOptions,
+) -> Result<Box<dyn Tracer>> {
+    match tracer(backend, target.clone(), options.clone()) {
+        Ok(t) => Ok(t),
+        Err(e @ (TraceError::EbpfUnsupported(_) | TraceError::BackendUnavailable(_)))
+            if backend == Backend::Ebpf =>
+        {
+            eprintln!("syren: {e}; falling back to the ptrace backend");
+            tracer(Backend::Ptrace, target, options).context("failed to start tracer")
+        }
+        Err(e) => Err(e).context("failed to start tracer"),
+    }
 }
 
 fn build_target(cli: &Cli) -> Result<Target> {

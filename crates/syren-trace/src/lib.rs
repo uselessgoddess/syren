@@ -20,7 +20,7 @@ mod ptrace;
 use std::path::PathBuf;
 
 pub use ptrace::PtraceTracer;
-use syren_common::Event;
+use syren_common::{Event, MemoryReader, NullMemory, ProcMemReader, SyscallEvent};
 
 /// Result alias for tracing operations.
 pub type Result<T> = std::result::Result<T, TraceError>;
@@ -44,6 +44,12 @@ pub enum TraceError {
     /// The requested backend is not compiled into this build.
     #[error("backend `{0}` is not available in this build")]
     BackendUnavailable(&'static str),
+
+    /// The eBPF backend is compiled in but cannot run here (no `CAP_BPF`, no
+    /// kernel BTF, load/verify failure, ...). Carries a human-readable reason
+    /// and is the cue for callers to fall back to ptrace.
+    #[error("eBPF backend unavailable: {0}")]
+    EbpfUnsupported(String),
 
     /// Any other setup failure with a human-readable message.
     #[error("{0}")]
@@ -110,6 +116,22 @@ pub trait Tracer {
     /// meaningful leader.
     fn leader(&self) -> Option<u32> {
         None
+    }
+
+    /// Open a reader over the tracee's memory for the most recently produced
+    /// syscall `ev`, used by the decoder to follow pointer arguments (paths,
+    /// buffers).
+    ///
+    /// The default reads `/proc/<tid>/mem`, which is what the ptrace backend
+    /// wants (the tracee is stopped at its syscall boundary). Backends that
+    /// capture memory by other means — the eBPF backend snapshots paths
+    /// in-kernel — override this. Either way the decoder stays oblivious to
+    /// which backend produced the bytes.
+    fn memory(&self, ev: &SyscallEvent) -> Box<dyn MemoryReader> {
+        match ProcMemReader::open(ev.tid) {
+            Ok(reader) => Box::new(reader),
+            Err(_) => Box::new(NullMemory),
+        }
     }
 }
 

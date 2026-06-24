@@ -82,3 +82,42 @@ jobs:
       - uses: EmbarkStudios/cargo-deny-action@v2
         with:
           command: check
+
+  bpf-object:
+    name: bpf object
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify the committed BPF object
+        run: |
+          obj=crates/syren-trace/src/bpf/syren.bpf.o
+          test -s "$obj" || { echo "::error::BPF object missing or empty"; exit 1; }
+          readelf -h "$obj" | grep -q 'Linux BPF' \
+            || { echo "::error::$obj is not a BPF ELF"; exit 1; }
+          for sym in sys_enter sys_exit sched_process_fork \
+                     EVENTS ENTERS TARGETS PATHARG SCRATCH; do
+            readelf -sW "$obj" | grep -qw "$sym" \
+              || { echo "::error::BPF object is missing symbol: $sym"; exit 1; }
+          done
+          echo "BPF object is a valid BPF ELF with all expected programs and maps"
+
+  ebpf:
+    name: ebpf (privileged e2e)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Kernel eBPF capabilities
+        run: |
+          uname -a
+          ls -l /sys/kernel/btf/vmlinux 2>/dev/null || echo "no kernel BTF"
+      - name: Build eBPF integration test
+        run: cargo test -p syren-trace --features ebpf --test spawn --no-run
+      - name: Run eBPF integration test with CAP_BPF
+        run: |
+          bin=$(cargo test -p syren-trace --features ebpf --test spawn --no-run \
+                  --message-format=json \
+                | jq -r 'select(.executable != null) | .executable')
+          echo "running $bin as root"
+          sudo -E "$bin" --nocapture

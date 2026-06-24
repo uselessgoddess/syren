@@ -36,3 +36,17 @@ ci: pre deny msrv
 # Run the CLI, e.g. `just run -- -e trace=write echo hi`.
 run *args:
     cargo run -p syren-cli -- {{ args }}
+
+# Rebuild the in-kernel BPF object and refresh the checked-in artefact.
+bpf:
+    cd crates/syren-ebpf && cargo build --release
+    cp crates/syren-ebpf/target/bpfel-unknown-none/release/syren \
+        crates/syren-trace/src/bpf/syren.bpf.o
+
+# Benchmark tracing overhead under a syscall-heavy load.
+bench *args:
+    cargo build --release -p syren-trace --features ebpf --example overhead
+    # grant ebpf capabilieties 
+    -setcap cap_bpf,cap_sys_admin,cap_net_admin=ep target/release/examples/overhead
+    # run as regular user
+    target/release/examples/overhead {{ args }}

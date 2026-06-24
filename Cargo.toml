@@ -1,6 +1,7 @@
 [workspace]
 resolver = "2"
 members = ["crates/*"]
+exclude = ["crates/syren-ebpf"]
 
 [workspace.package]
 version = "0.1.0"
@@ -19,6 +20,8 @@ syren-trace = { path = "crates/syren-trace", version = "0.1.0" }
 syren-common = { path = "crates/syren-common", version = "0.1.0" }
 syren-decode = { path = "crates/syren-decode", version = "0.1.0" }
 syren-output = { path = "crates/syren-output", version = "0.1.0" }
+
+aya = { version = "0.13" }
 
 # errors
 anyhow = "1.0"
