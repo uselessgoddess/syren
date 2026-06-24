@@ -8,15 +8,15 @@ use aya::maps::{Array, HashMap as BpfHashMap, MapData, RingBuf};
 use aya::programs::TracePoint;
 use nix::sys::wait::{WaitPidFlag, WaitStatus, waitpid};
 use nix::unistd::{ForkResult, Pid, execvp, fork};
+use syren_common::ebpf::{MAX_SYSCALLS, Record};
 use syren_common::{
     ArgType, Event, MemoryReader, ProcMemReader, SYSCALLS, SyscallEvent, SyscallInfo,
 };
-use syren_common::ebpf::{MAX_SYSCALLS, Record};
 
 use crate::{Result, Target, TraceError, TraceOptions, Tracer};
 
 static BPF_OBJECT: &[u8] =
-    include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/src/bpf/syren.bpf.o"));
+    aya::include_bytes_aligned!(concat!(env!("CARGO_MANIFEST_DIR"), "/src/bpf/syren.bpf.o"));
 
 #[derive(Debug, Clone)]
 struct Capture {
@@ -138,8 +138,6 @@ impl EbpfTracer {
         }
     }
 
-    /// Trace already-running pids; new threads/children are picked up in-kernel
-    /// under `--follow`.
     fn attach(&mut self, pids: Vec<i32>) -> Result<()> {
         if pids.is_empty() {
             return Err(TraceError::Other("no pids supplied to attach to".into()));
@@ -168,10 +166,7 @@ impl EbpfTracer {
         Ok(())
     }
 
-    /// Pull every record currently in the ring buffer into the queue.
     fn drain_ring(&mut self) {
-        // Snapshot the baseline so the loop body touches no `&self` method
-        // while `item` holds the ring's mutable borrow.
         let baseline = self.baseline_ns;
         while let Some(item) = self.ring.next() {
             let Some(rec) = Record::from_bytes(&item) else { continue };
@@ -182,7 +177,6 @@ impl EbpfTracer {
         }
     }
 
-    /// `true` once every traced task is gone (and its exit enqueued).
     fn liveness_done(&mut self) -> bool {
         if let Some(child) = self.child {
             match waitpid(child, Some(WaitPidFlag::WNOHANG)) {
@@ -195,7 +189,6 @@ impl EbpfTracer {
                     true
                 }
                 Ok(_) => false,
-                // Already reaped or never ours: treat as gone.
                 Err(_) => {
                     self.enqueue_exit(0);
                     true
@@ -213,10 +206,6 @@ impl EbpfTracer {
         }
     }
 
-    /// Close out the trace with a final [`Event::ProcessExit`]. The tracee is
-    /// gone, so the ring now holds its last records: drain them *first* so any
-    /// trailing syscalls are emitted before the exit marker, never reordered
-    /// behind it.
     fn enqueue_exit(&mut self, code: i32) {
         self.drain_ring();
         if let Some(pid) = self.leader {
@@ -225,7 +214,6 @@ impl EbpfTracer {
         self.finished = true;
     }
 
-    /// Block (up to `timeout_ms`) until the ring buffer is readable.
     fn wait_ring(&self, timeout_ms: i32) {
         let mut pfd = libc::pollfd { fd: self.ring.as_raw_fd(), events: libc::POLLIN, revents: 0 };
         unsafe { libc::poll(&mut pfd, 1, timeout_ms) };
@@ -247,8 +235,6 @@ impl Tracer for EbpfTracer {
                 return Ok(None);
             }
             if self.liveness_done() {
-                // `liveness_done` flushed the ring's final records ahead of the
-                // exit marker; loop back to drain the now-non-empty queue.
                 continue;
             }
             self.wait_ring(100);
@@ -282,14 +268,10 @@ impl MemoryReader for EbpfMemory {
                 return Some(cap.bytes[off..stop].to_vec());
             }
         }
-        // The tracee is not stopped, so this is best-effort: it succeeds while
-        // the process is alive and the pointer still valid.
         ProcMemReader::open(self.tid).ok().and_then(|m| m.read(addr, len))
     }
 }
 
-/// Rebuild a [`SyscallEvent`] from an in-kernel [`Record`], rebasing its
-/// timestamp onto the trace-start `baseline` (kernel `ktime` → "ns since start").
 fn record_to_event(rec: &Record, baseline: u64) -> SyscallEvent {
     SyscallEvent {
         pid: rec.pid,
@@ -302,7 +284,6 @@ fn record_to_event(rec: &Record, baseline: u64) -> SyscallEvent {
     }
 }
 
-/// Attach `prog_name` to the `category:event` tracepoint.
 fn attach_tracepoint(
     bpf: &mut aya::Ebpf,
     prog_name: &str,
@@ -325,9 +306,6 @@ fn attach_tracepoint(
     Ok(())
 }
 
-/// Fill the kernel's `PATHARG` table from the syscall metadata: the single
-/// source of truth for which argument (if any) is a path lives in the Rust
-/// table, never duplicated in BPF.
 fn populate_patharg(bpf: &mut aya::Ebpf) -> Result<()> {
     let mut patharg: Array<_, u8> = bpf
         .map_mut("PATHARG")
@@ -345,12 +323,6 @@ fn populate_patharg(bpf: &mut aya::Ebpf) -> Result<()> {
     Ok(())
 }
 
-/// The kernel `PATHARG` table value for `s`: `idx + 1` of its path argument, or
-/// `None` if there is none to capture in-kernel.
-///
-/// `execve`/`execveat` are deliberately excluded — they replace the address
-/// space, so the path pointer is already invalid by the time the syscall-exit
-/// (where we read it) fires.
 fn path_arg_slot(s: &SyscallInfo) -> Option<u8> {
     if s.name == "execve" || s.name == "execveat" {
         return None;
@@ -359,8 +331,6 @@ fn path_arg_slot(s: &SyscallInfo) -> Option<u8> {
     (s.number < MAX_SYSCALLS && idx < 6).then_some((idx + 1) as u8)
 }
 
-/// Cheap pre-flight check so an unavailable backend fails fast (and the CLI can
-/// fall back) before we attempt a load that would fail anyway.
 fn probe() -> Result<()> {
     if !Path::new("/sys/kernel/btf/vmlinux").exists() {
         return Err(TraceError::EbpfUnsupported(
@@ -375,12 +345,11 @@ fn probe() -> Result<()> {
     Ok(())
 }
 
-/// `true` if this process is root or holds `CAP_BPF`/`CAP_SYS_ADMIN`.
 fn has_bpf_capability() -> bool {
     if unsafe { libc::geteuid() } == 0 {
         return true;
     }
-    // CAP_SYS_ADMIN = 21, CAP_BPF = 39 (either lets us load these programs).
+    // CAP_SYS_ADMIN = 21, CAP_BPF = 39.
     let Some(eff) = read_cap_eff() else { return false };
     (eff >> 21) & 1 == 1 || (eff >> 39) & 1 == 1
 }
@@ -446,8 +415,8 @@ fn cstring(bytes: &[u8]) -> Result<CString> {
 
 #[cfg(test)]
 mod tests {
+    use syren_common::ebpf::{CAP_BYTES, Record};
     use syren_common::syscall_by_name;
-    use syren_ebpf_common::{CAP_BYTES, Record};
 
     use super::*;
 
@@ -468,6 +437,17 @@ mod tests {
     }
 
     #[test]
+    fn ebpf_is_parseable() {
+        let object = aya_obj::Object::parse(BPF_OBJECT).expect("embedded BPF object parses");
+        for program in ["sys_enter", "sys_exit", "sched_process_fork"] {
+            assert!(object.programs.contains_key(program), "missing BPF program {program}");
+        }
+        for map in ["EVENTS", "ENTERS", "TARGETS", "PATHARG", "SCRATCH"] {
+            assert!(object.maps.contains_key(map), "missing BPF map {map}");
+        }
+    }
+
+    #[test]
     fn record_maps_onto_syscall_event() {
         let ev = record_to_event(&record(257), 1_000);
         assert_eq!(ev.pid, 100);
@@ -475,26 +455,23 @@ mod tests {
         assert_eq!(ev.nr, 257);
         assert_eq!(ev.args, [1, 2, 3, 4, 5, 6]);
         assert_eq!(ev.retval, -2);
-        // Timestamp is rebased onto the trace-start baseline.
         assert_eq!(ev.ts_enter_ns, 4_000);
         assert_eq!(ev.duration_ns, 250);
     }
 
     #[test]
-    fn timestamp_rebase_never_underflows() {
-        // A record stamped before the captured baseline clamps to zero rather
-        // than wrapping around u64.
+    fn timestamp_never_underflows() {
         let ev = record_to_event(&record(0), 9_000);
         assert_eq!(ev.ts_enter_ns, 0);
     }
 
     #[test]
-    fn path_arg_slot_selects_the_path_argument() {
-        // open(filename, ...) → arg 0 → slot 1.
+    fn selects_path_argument() {
+        // open(filename, ...) -> arg 0 -> slot 1.
         assert_eq!(path_arg_slot(syscall_by_name("open").unwrap()), Some(1));
-        // openat(dfd, filename, ...) → arg 1 → slot 2.
+        // openat(dfd, filename, ...) -> arg 1 -> slot 2.
         assert_eq!(path_arg_slot(syscall_by_name("openat").unwrap()), Some(2));
-        // access(filename, mode) → arg 0 → slot 1.
+        // access(filename, mode) -> arg 0 -> slot 1.
         assert_eq!(path_arg_slot(syscall_by_name("access").unwrap()), Some(1));
         // read has no path argument.
         assert_eq!(path_arg_slot(syscall_by_name("read").unwrap()), None);
@@ -502,34 +479,25 @@ mod tests {
 
     #[test]
     fn execve_path_is_excluded() {
-        // execve genuinely carries a path argument...
         let execve = syscall_by_name("execve").unwrap();
         assert!(execve.args.iter().any(|a| a.ty == ArgType::Path));
-        // ...but we never capture it (the address space is gone at exit).
         assert_eq!(path_arg_slot(execve), None);
         assert_eq!(path_arg_slot(syscall_by_name("execveat").unwrap()), None);
     }
 
     #[test]
-    fn ebpf_memory_serves_captured_bytes() {
-        // A tid that owns no /proc/<tid>/mem, so only the capture can satisfy
-        // reads; digits make byte offsets self-evident.
+    fn memory_serves_captured_bytes() {
         let mem = EbpfMemory {
             tid: u32::MAX,
             capture: Some(Capture { addr: 0x4000, bytes: b"0123456789".to_vec() }),
         };
-        // A read inside the captured range returns the captured bytes.
         assert_eq!(mem.read(0x4000, 4), Some(b"0123".to_vec()));
-        // Reading from a mid-buffer address, past the end, clamps to what was
-        // captured rather than over-reading.
         assert_eq!(mem.read(0x4000 + 8, 999), Some(b"89".to_vec()));
-        // An address outside the captured range falls through to /proc (which
-        // does not exist for this tid), yielding nothing rather than garbage.
         assert_eq!(mem.read(0x9999, 4), None);
     }
 
     #[test]
-    fn ebpf_memory_without_capture_falls_back() {
+    fn memory_without_capture() {
         let mem = EbpfMemory { tid: u32::MAX, capture: None };
         assert_eq!(mem.read(0x4000, 4), None);
     }

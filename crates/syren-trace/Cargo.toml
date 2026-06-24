@@ -23,3 +23,6 @@ aya = { workspace = true, optional = true }
 [features]
 default = []
 ebpf = ["dep:aya", "syren-common/ebpf"]
+
+[dev-dependencies]
+aya-obj = "0.2"
