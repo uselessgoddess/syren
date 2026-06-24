@@ -13,6 +13,9 @@ publish = false
 aya-ebpf = { version = "0.1" }
 syren-common = { path = "../syren-common", features = ["ebpf"] }
 
+[features]
+bench-selfarm = []
+
 [[bin]]
 name = "syren"
 path = "src/main.rs"
@@ -20,6 +23,7 @@ path = "src/main.rs"
 [profile.release]
 opt-level = 3
 debug = false
-lto = true
+strip = true
+lto = "fat"
 panic = "abort"
 codegen-units = 1

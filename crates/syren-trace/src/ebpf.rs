@@ -442,7 +442,7 @@ mod tests {
         for program in ["sys_enter", "sys_exit", "sched_process_fork"] {
             assert!(object.programs.contains_key(program), "missing BPF program {program}");
         }
-        for map in ["EVENTS", "ENTERS", "TARGETS", "PATHARG", "SCRATCH"] {
+        for map in ["EVENTS", "ENTERS", "TARGETS", "PATHARG"] {
             assert!(object.maps.contains_key(map), "missing BPF map {map}");
         }
     }

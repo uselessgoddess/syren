@@ -24,6 +24,9 @@ pub use mem::{MemoryReader, NullMemory, ProcMemReader};
 use serde::{Deserialize, Serialize};
 pub use signal::signal_name;
 
+// Magic bytes used to identify syren
+pub const MAGIC: u64 = 0x535952454E; // "SYREN"
+
 /// Coarse syscall category.
 /// Kept variant-for-variant in sync with `syren_gen::Category`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

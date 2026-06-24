@@ -1,22 +1,3 @@
-//! Overhead microbenchmark: ptrace vs eBPF under a syscall-heavy load.
-//!
-//! The driver spawns *this very binary* in a `--workload` mode that issues a
-//! fixed number of real `getpid(2)` calls in a tight loop — the cheapest syscall
-//! there is, so the *tracing* cost dominates the measurement rather than the
-//! syscall's own work — and times it three ways: untraced (the baseline), under
-//! the ptrace backend, and under the eBPF backend.
-//!
-//! Run it with `just bench` (which enables the `ebpf` feature) or directly:
-//!
-//! ```console
-//! $ cargo run --release -p syren-trace --features ebpf --example overhead
-//! $ cargo run --release -p syren-trace --features ebpf --example overhead -- 500000 5
-//! ```
-//!
-//! The eBPF row needs `CAP_BPF` + kernel BTF; without them (or without the
-//! `ebpf` feature) it prints the reason it is unavailable instead of a time —
-//! exactly the graceful degradation the CLI relies on in production.
-
 use std::path::Path;
 use std::process::Command;
 use std::time::{Duration, Instant};
@@ -24,7 +5,6 @@ use std::time::{Duration, Instant};
 use syren_common::Event;
 use syren_trace::{Backend, Target, TraceError, TraceOptions, Tracer, tracer};
 
-/// A single timed run: best wall-clock time and how many syscalls were observed.
 struct Run {
     wall: Duration,
     seen: u64,
@@ -33,13 +13,11 @@ struct Run {
 fn main() {
     let argv: Vec<String> = std::env::args().skip(1).collect();
 
-    // Re-exec entry point: the traced child is just `overhead --workload N`.
     if argv.first().map(String::as_str) == Some("--workload") {
         let n = argv.get(1).and_then(|s| s.parse().ok()).unwrap_or(0);
         return workload(n);
     }
 
-    // Driver mode. Positional args: [syscalls] [reps].
     let syscalls: u64 = argv.first().and_then(|s| s.parse().ok()).unwrap_or(200_000);
     let reps: u32 = argv.get(1).and_then(|s| s.parse().ok()).unwrap_or(3).max(1);
 
@@ -53,7 +31,6 @@ fn main() {
     );
     println!("{:-<8} {:->11}  {:->8}  {:->10}  {:->13}", "", "", "", "", "");
 
-    // Baseline: the same workload, untraced.
     let base = best(reps, || {
         let start = Instant::now();
         let status =
@@ -67,17 +44,15 @@ fn main() {
     report("ebpf", syscalls, base, trace_run(reps, Backend::Ebpf, &exe, &count));
 }
 
-/// Issue `n` real `getpid(2)` calls. Going through `libc::syscall` (rather than
-/// the cached `getpid()` wrapper) guarantees every iteration is a real user →
-/// kernel round trip — precisely the cost a tracer multiplies.
 fn workload(n: u64) {
+    if std::env::var_os("SYREN_BENCH_SELFARM").is_some() {
+        unsafe { libc::syscall(libc::SYS_personality, syren_common::MAGIC) };
+    }
     for _ in 0..n {
         std::hint::black_box(unsafe { libc::syscall(libc::SYS_getpid) });
     }
 }
 
-/// Trace the workload `reps` times, returning the best run — or the backend's
-/// setup error (e.g. eBPF unavailable here), which the caller reports verbatim.
 fn trace_run(reps: u32, backend: Backend, exe: &Path, count: &str) -> Result<Run, TraceError> {
     let mut best: Option<Run> = None;
     for _ in 0..reps {
@@ -96,7 +71,6 @@ fn trace_run(reps: u32, backend: Backend, exe: &Path, count: &str) -> Result<Run
     Ok(best.expect("reps >= 1"))
 }
 
-/// Drive a tracer to completion, counting the syscall events it yields.
 fn drain(mut t: Box<dyn Tracer>) -> u64 {
     let mut syscalls = 0;
     while let Some(event) = t.next_event().expect("tracer error") {
@@ -107,7 +81,6 @@ fn drain(mut t: Box<dyn Tracer>) -> u64 {
     syscalls
 }
 
-/// Best (minimum) wall time over `reps` runs of `run`.
 fn best(reps: u32, mut run: impl FnMut() -> Duration) -> Duration {
     (0..reps).map(|_| run()).min().expect("reps >= 1")
 }

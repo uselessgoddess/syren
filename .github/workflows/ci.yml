@@ -95,7 +95,7 @@ jobs:
           readelf -h "$obj" | grep -q 'Linux BPF' \
             || { echo "::error::$obj is not a BPF ELF"; exit 1; }
           for sym in sys_enter sys_exit sched_process_fork \
-                     EVENTS ENTERS TARGETS PATHARG SCRATCH; do
+                     EVENTS ENTERS TARGETS PATHARG; do
             readelf -sW "$obj" | grep -qw "$sym" \
               || { echo "::error::BPF object is missing symbol: $sym"; exit 1; }
           done

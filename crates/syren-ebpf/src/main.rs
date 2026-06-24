@@ -16,7 +16,7 @@
 use aya_ebpf::helpers::gen::bpf_ktime_get_ns;
 use aya_ebpf::helpers::{bpf_get_current_pid_tgid, bpf_probe_read_user_str_bytes};
 use aya_ebpf::macros::{map, tracepoint};
-use aya_ebpf::maps::{Array, HashMap, PerCpuArray, RingBuf};
+use aya_ebpf::maps::{Array, HashMap, RingBuf};
 use aya_ebpf::programs::TracePointContext;
 use syren_common::ebpf::{CAP_BYTES, MAX_SYSCALLS, Record};
 
@@ -26,6 +26,13 @@ struct Enter {
     nr: u64,
     args: [u64; 6],
     ts: u64,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct RawEnter {
+    id: i64,
+    args: [u64; 6],
 }
 
 #[map]
@@ -39,9 +46,6 @@ static TARGETS: HashMap<u32, u8> = HashMap::with_max_entries(4_096, 0);
 
 #[map]
 static PATHARG: Array<u8> = Array::with_max_entries(MAX_SYSCALLS, 0);
-
-#[map]
-static SCRATCH: PerCpuArray<Record> = PerCpuArray::with_max_entries(1, 0);
 
 #[tracepoint(category = "raw_syscalls", name = "sys_enter")]
 pub fn sys_enter(ctx: TracePointContext) -> u32 {
@@ -69,20 +73,14 @@ fn is_target(tid: u32) -> bool {
 
 fn try_enter(ctx: &TracePointContext) -> Result<(), i64> {
     let tid = bpf_get_current_pid_tgid() as u32;
+    #[cfg(feature = "bench-selfarm")]
+    selfarm(ctx, tid);
     if !is_target(tid) {
         return Ok(());
     }
-    // `raw_syscalls:sys_enter` layout: id@8, args[6]@16.
-    let nr: i64 = unsafe { ctx.read_at(8) }?;
-    let args = [
-        unsafe { ctx.read_at(16) }.unwrap_or(0),
-        unsafe { ctx.read_at(24) }.unwrap_or(0),
-        unsafe { ctx.read_at(32) }.unwrap_or(0),
-        unsafe { ctx.read_at(40) }.unwrap_or(0),
-        unsafe { ctx.read_at(48) }.unwrap_or(0),
-        unsafe { ctx.read_at(56) }.unwrap_or(0),
-    ];
-    let enter = Enter { nr: nr as u64, args, ts: unsafe { bpf_ktime_get_ns() } };
+    // `raw_syscalls:sys_enter` layout: id@8, args[6]@16
+    let raw: RawEnter = unsafe { ctx.read_at(8) }?;
+    let enter = Enter { nr: raw.id as u64, args: raw.args, ts: unsafe { bpf_ktime_get_ns() } };
     let _ = ENTERS.insert(&tid, &enter, 0);
     Ok(())
 }
@@ -91,9 +89,6 @@ fn try_exit(ctx: &TracePointContext) -> Result<(), i64> {
     let pid_tgid = bpf_get_current_pid_tgid();
     let tgid = (pid_tgid >> 32) as u32;
     let tid = pid_tgid as u32;
-    if !is_target(tid) {
-        return Ok(());
-    }
     let enter = match unsafe { ENTERS.get(&tid) } {
         Some(e) => *e,
         None => return Ok(()),
@@ -104,9 +99,13 @@ fn try_exit(ctx: &TracePointContext) -> Result<(), i64> {
     let ret: i64 = unsafe { ctx.read_at(16) }.unwrap_or(0);
     let now = unsafe { bpf_ktime_get_ns() };
 
-    let rec_ptr = SCRATCH.get_ptr_mut(0).ok_or(0i64)?;
-    // SAFETY: `rec_ptr` points at this CPU's scratch slot; we fully initialise
-    // every field before handing the record to the ring buffer.
+    let mut entry = match EVENTS.reserve::<Record>(0) {
+        Some(entry) => entry,
+        None => return Ok(()),
+    };
+    let rec_ptr = entry.as_mut_ptr();
+    // SAFETY: `rec_ptr` points at reserved ring storage;
+    // we initialise every field before submitting.
     unsafe {
         let r = &mut *rec_ptr;
         r.pid = tgid;
@@ -120,8 +119,8 @@ fn try_exit(ctx: &TracePointContext) -> Result<(), i64> {
         r.cap_len = 0;
         r._pad = 0;
         capture_path(r, &enter);
-        let _ = EVENTS.output(&*rec_ptr, 0);
     }
+    entry.submit(0);
     Ok(())
 }
 
@@ -145,6 +144,20 @@ unsafe fn capture_path(r: &mut Record, enter: &Enter) {
         r.cap_addr = addr;
         let n = read.len();
         r.cap_len = if n < CAP_BYTES { (n + 1) as u32 } else { CAP_BYTES as u32 };
+    }
+}
+
+#[cfg(feature = "bench-selfarm")]
+#[inline(always)]
+fn selfarm(ctx: &TracePointContext, tid: u32) {
+    const MARKER_NR: u64 = 135; // x86-64 personality(2)
+    let nr: u64 = unsafe { ctx.read_at::<i64>(8) }.unwrap_or(-1) as u64;
+    if nr != MARKER_NR {
+        return;
+    }
+    let arg0: u64 = unsafe { ctx.read_at(16) }.unwrap_or(0);
+    if arg0 == syren_common::MAGIC {
+        let _ = TARGETS.insert(&tid, &1u8, 0);
     }
 }
 

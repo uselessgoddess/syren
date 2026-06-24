@@ -26,3 +26,7 @@ ebpf = ["dep:aya", "syren-common/ebpf"]
 
 [dev-dependencies]
 aya-obj = "0.2"
+
+[[example]]
+name = "profile"
+required-features = ["ebpf"]
